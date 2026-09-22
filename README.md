@@ -8,7 +8,7 @@ ALLOW / CONFIRM / DENY 裁决（内建工具、扩展工具、MCP 工具都覆�
 
 | | |
 | --- | --- |
-| 版本 | **v1.2.0**（见 `CHANGELOG.md`） |
+| 版本 | **v1.2.0**（变更记录 [`CHANGELOG.md`](CHANGELOG.md) · 发布说明 [`docs/release-notes-v1.2.0.md`](docs/release-notes-v1.2.0.md)） |
 | 平台 | **Windows**（其它平台会主动降级为 DEGRADED，见下面 §0.2） |
 | 许可 | MIT（见 `LICENSE`） |
 

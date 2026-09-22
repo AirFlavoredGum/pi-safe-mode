@@ -2,6 +2,8 @@
 
 ## v1.2.0 — 可移植化 + HARD-OFF（完全关闭）
 
+> 面向使用者的完整说明（含安装、升级、English summary）：[`docs/release-notes-v1.2.0.md`](docs/release-notes-v1.2.0.md)
+
 ### 新增：HARD-OFF（`safe.txt` §38）
 
 - `/safe off --hard`：**两步人工确认**（确认框 + 键入「完全关闭」）后，本会话彻底关闭

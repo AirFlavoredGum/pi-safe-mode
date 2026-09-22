@@ -75,6 +75,7 @@ if ($WhatIf) {
     Write-Host 'WhatIf: would create/update:' -ForegroundColor Cyan
     foreach ($c in $copies) { Write-Host "  $($c.To)" }
     Write-Host "  $SafeHome\pi-extension\**  (implementation, canonical copy)"
+    Write-Host "  $SafeHome\docs\**  (release notes)"
     Write-Host ''
     Write-Host 'WhatIf: nothing was written. Note that the mirror is NOT updated by this script;' -ForegroundColor Cyan
     Write-Host 'WhatIf: run safe-bootstrap.ps1 -Fix afterwards to sync it.' -ForegroundColor Cyan
@@ -91,6 +92,10 @@ foreach ($c in $copies) {
 }
 Copy-Item -LiteralPath (Join-Path $Repo 'pi-extension') -Destination $SafeHome -Recurse -Force
 Write-Host "  copied $SafeHome\pi-extension\ (recursive)"
+if (Test-Path -LiteralPath (Join-Path $Repo 'docs')) {
+    Copy-Item -LiteralPath (Join-Path $Repo 'docs') -Destination $SafeHome -Recurse -Force
+    Write-Host "  copied $SafeHome\docs\ (release notes)"
+}
 if (-not (Test-Path -LiteralPath $MirrorDir)) {
     New-Item -ItemType Directory -Path $MirrorDir -Force | Out-Null
     Write-Host "  created $MirrorDir"
