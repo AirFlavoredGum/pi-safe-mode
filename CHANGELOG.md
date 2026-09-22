@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## v1.3.0 — HARD-OFF 进入设置面板
+
+> 面向使用者的说明（含面板截图式示例、升级步骤、English summary）：[`docs/release-notes-v1.3.0.md`](docs/release-notes-v1.3.0.md)
+
+- `/safe` 面板新增 **⛔ 完全关闭（HARD-OFF）**，与四个等级并列（放在 STRICT 之后）
+- 选中它**仍走两步人工确认**（确认框 + 键入「完全关闭」）—— 面板只降低「找到它」的成本，
+  不降低「触发它」的成本
+- HARD-OFF 生效时：面板标题显示当前状态、✅ 落在 ⛔ 那一行、四个等级都不再标 ✅
+  （因为此时没有任何等级在生效）
+- HARD-OFF 生效时从面板选任一等级 = **恢复保护**（新增 `applyLevel()`：先重新开启
+  —— 重读策略 + 完整性校验 + 重装子代理上限 —— 再切等级）
+- 面板的选项回调改为支持 async（`actions[]` 允许返回 Promise），`setLevel` 保持同步不变
+- `safe.txt` §38 补上「面板」这条入口，并写明它仍是两步确认
+- `SAFE_MODE_VERSION` → `1.3.0`
+- 测试：新增 11 项面板检查，**engine 102 + e2e 181 全部通过**
+
 ## v1.2.0 — 可移植化 + HARD-OFF（完全关闭）
 
 > 面向使用者的完整说明（含安装、升级、English summary）：[`docs/release-notes-v1.2.0.md`](docs/release-notes-v1.2.0.md)

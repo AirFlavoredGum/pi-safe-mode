@@ -1179,8 +1179,10 @@ HARD-OFF means the implementation behaves as if it had never been installed:
 
 Constraints that keep this exception from becoming the easy path:
 
-* it can only be entered by an explicit human action: `/safe off --hard` (a confirmation
-dialog **plus** a typed confirmation word) or the launch flag `pi --unsafe`
+* it can only be entered by an explicit human action: the `/safe` settings panel (choose the
+HARD-OFF item, which sits next to the four levels), `/safe off --hard`, or the launch flag
+`pi --unsafe`. The command and the panel both require a confirmation dialog **plus** a typed
+confirmation word — the panel is a shortcut for finding the switch, not a shortcut past the check
 * the model must never enable it, suggest enabling it, or treat it as a way around a
 refusal. It must not re-enter it after the user leaves it
 * it is session-scoped and is never persisted: a new Pi session starts from the configured

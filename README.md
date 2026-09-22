@@ -8,7 +8,7 @@ ALLOW / CONFIRM / DENY 裁决（内建工具、扩展工具、MCP 工具都覆�
 
 | | |
 | --- | --- |
-| 版本 | **v1.2.0**（变更记录 [`CHANGELOG.md`](CHANGELOG.md) · 发布说明 [`docs/release-notes-v1.2.0.md`](docs/release-notes-v1.2.0.md)） |
+| 版本 | **v1.3.0**（变更记录 [`CHANGELOG.md`](CHANGELOG.md) · 发布说明 [`docs/release-notes-v1.3.0.md`](docs/release-notes-v1.3.0.md)） |
 | 平台 | **Windows**（其它平台会主动降级为 DEGRADED，见下面 §0.2） |
 | 许可 | MIT（见 `LICENSE`） |
 
@@ -114,7 +114,7 @@ Safe Mode 当前版本：**v1.2.0**（`1.1.0` = 审计后加固版；`1.0.0` = �
 输入 `/safe` 回车，就打开**开关式设置面板**：
 
 ```
-🛡 Safe Mode 设置
+🛡 Safe Mode 设置 · v1.3.0
 
 当前等级：🔵 平衡（本窗口一直有效）
 新开 pi 时：🔵 平衡
@@ -122,10 +122,11 @@ Safe Mode 当前版本：**v1.2.0**（`1.1.0` = 审计后加固版；`1.0.0` = �
 选一个等级就切换。带 ✅ 的是当前生效的。
 ↑↓ 选择 · 回车确认 · Esc 关闭
 
+　 ⭕ 关闭（OFF）—— 只留最基本保护（凭据、窃取、恶意行为仍然拦）
+　 🟢 低（LOW）—— 开发最顺畅，几乎不弹窗
 ✅ 🔵 平衡（BALANCED）—— 日常推荐：普通开发自动执行，危险操作问一下
 　 🟠 严格（STRICT）—— 陌生项目、第三方代码、复杂命令时用
-　 🟢 低（LOW）—— 开发最顺畅，几乎不弹窗
-　 ⭕ 关闭（OFF）—— 只留最基本保护（凭据、窃取、恶意行为仍然拦）
+　 ⛔ 完全关闭（HARD-OFF）—— 不拦截 / 不注入 / 不审计 / 不脱敏（需两步确认）
 ────────────────────────────────
 　⭐ 让新开的 pi 也用「平衡」
 　ℹ️ 查看简版状态
@@ -134,6 +135,10 @@ Safe Mode 当前版本：**v1.2.0**（`1.1.0` = 审计后加固版；`1.0.0` = �
 　🔄 重新读取 safe.txt
 　✅ 重新做完整性校验
 ```
+
+⛔ 那一项**与四个等级并列**，但不属于等级体系：它不能通过 `/safe <level>` 设置、
+不能成为新开 pi 的默认值（见 §10）；选它仍会走两步人工确认（确认框 + 键入「完全关闭」）。
+处于 HARD-OFF 时面板标题会显示状态，✅ 会落在那一行，此时选任一等级就是**恢复保护**。
 
 切换等级后面板会**自动重新打开**，可以继续调；按 **Esc 关闭**。
 
@@ -350,6 +355,7 @@ D:\pi-agent\
 
 ```
 /safe off --hard      # 两步人工确认（确认框 + 键入「完全关闭」）
+/safe 面板 → ⛔ 完全关闭（HARD-OFF）   # 同上，与四个等级并列的选项
 pi --unsafe           # 启动即完全关闭（仅本次运行）
 ```
 
@@ -409,7 +415,7 @@ pi-safe-mode/
 
 ```powershell
 node <safe-mode>\pi-extension\tests\engine.test.mjs   # 策略引擎 + 归一化 + 审计（102 项）
-node <safe-mode>\pi-extension\tests\e2e.test.mjs      # 运行时端到端 + HARD-OFF（170 项）
+node <safe-mode>\pi-extension\tests\e2e.test.mjs      # 运行时端到端 + HARD-OFF + 面板（181 项）
 ```
 
 解析不到时用环境变量指定：`SAFE_TEST_JITI`、`SAFE_TEST_PI_ROOT`、`SAFE_TEST_IMPL_DIR`、

@@ -604,6 +604,54 @@ check("/safe off (soft) is not HARD-OFF", /HARD-OFF/.test(await statusText()), f
 await commands.safe.handler("on", ctxUI);
 
 // ===========================================================================
+// 25) HARD-OFF 也在 /safe 面板里（与四个等级并列），但仍走两步确认
+// ===========================================================================
+selectCalls.length = 0;
+panelScript = [];
+confirmAnswer = false;
+inputAnswer = undefined;
+await commands.safe.handler("", ctxUI); // 打开面板 → 无选项可点 → 退出
+const panelOptions = selectCalls[0]?.options ?? [];
+check("panel offers HARD-OFF next to the level list", panelOptions.some((o) => /完全关闭（HARD-OFF）/.test(o)), true);
+check("panel HARD-OFF row sits right after the four levels", panelOptions.findIndex((o) => /完全关闭（HARD-OFF）/.test(o)) > panelOptions.findIndex((o) => /（STRICT）/.test(o)), true);
+check("panel marks exactly one active choice while enforcing", panelOptions.filter((o) => o.startsWith("✅")).length, 1);
+
+// 25a. 面板里点 HARD-OFF：确认框通过但确认词不对 → 仍在保护
+panelScript = ["完全关闭（HARD-OFF）"];
+confirmAnswer = true;
+inputAnswer = "不是这个词";
+await commands.safe.handler("", ctxUI);
+check("panel HARD-OFF: wrong confirmation word keeps enforcement", await stillEnforcing(), true);
+
+// 25b. 确认词正确 → 真正关闭
+panelScript = ["完全关闭（HARD-OFF）"];
+inputAnswer = "完全关闭";
+await commands.safe.handler("", ctxUI);
+check("panel HARD-OFF: two-step confirmation turns the gate off", await stillEnforcing(), false);
+
+// 25c. 关闭时的面板：标题说明状态，✅ 落在 HARD-OFF 那一行，四个等级都不再标 ✅
+selectCalls.length = 0;
+panelScript = [];
+await commands.safe.handler("", ctxUI);
+const offTitle = selectCalls[0]?.title ?? "";
+const offOptions = selectCalls[0]?.options ?? [];
+check("panel title reflects the HARD-OFF state", /完全关闭/.test(offTitle), true);
+check("panel marks HARD-OFF as the active choice", offOptions.some((o) => o.startsWith("✅") && /HARD-OFF/.test(o)), true);
+check("panel still lists all four levels while HARD-OFF", offOptions.filter((o) => /（OFF）|（LOW）|（BALANCED）|（STRICT）/.test(o)).length, 4);
+check("panel marks no level while HARD-OFF", offOptions.filter((o) => o.startsWith("✅")).length, 1);
+
+// 25d. 在 HARD-OFF 下从面板选一个等级 → 重新开启保护
+panelScript = ["平衡"];
+await commands.safe.handler("", ctxUI);
+check("panel: choosing a level re-arms from HARD-OFF", await stillEnforcing(), true);
+check("panel: re-armed state is visible again", /BALANCED/.test(await statusText()), true);
+
+// 回复干净状态
+panelScript = [];
+confirmAnswer = false;
+inputAnswer = undefined;
+
+// ===========================================================================
 // 收尾
 // ===========================================================================
 check("notifications emitted", notices.length > 0, true);

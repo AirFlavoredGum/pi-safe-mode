@@ -98,13 +98,14 @@ export const POLICY_SCHEMA_VERSION = 1;
 /**
  * Safe Mode 实现版本。
  *   1.0.0 - 初版（本次审计之前）
- *   1.1.0 - 审计后的加固版（HARD-OFF 之前）
- *   1.2.0 - 可移植化（路径不再写死；见 paths.ts）+ HARD-OFF（§38）+ 测试可在任意安装位置运行
+ *   1.1.0 - 审计后的加固版
+ *   1.2.0 - 可移植化（路径不再写死；见 paths.ts）+ HARD-OFF（§38）
+ *   1.3.0 - HARD-OFF 进入 /safe 设置面板（与四个等级并列，仍走两步人工确认）
  *
  * 注意：它只是个「现在跑的是哪一代实现」的标签。篡改检测靠 safe-manifest.json 的哈希，
  * 不靠这个字符串 —— 改实现之后依然必须重新生成清单。
  */
-export const SAFE_MODE_VERSION = "1.2.0";
+export const SAFE_MODE_VERSION = "1.3.0";
 
 /** safe.txt 中必须存在的顶级章节（用于格式校验，见 方案.txt 第五节） */
 export const REQUIRED_SECTIONS: Array<{ num: number; title: string }> = [

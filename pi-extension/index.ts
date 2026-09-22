@@ -1583,7 +1583,7 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 						"  这个窗口没有任何工具边界保护：不拦截、不注入策略、不写审计、不做秘密脱敏。",
 						"  仅本次 pi 有效（没有写任何配置文件）；重启 pi 或在下面恢复即可。",
 						"",
-						`  重新开启：/safe on　或　Ctrl+Alt+S（恢复为 ${LEVEL_LABEL[level]}）`,
+						`  重新开启：/safe on　或　Ctrl+Alt+S　或　/safe 面板里选一个等级（恢复为 ${LEVEL_LABEL[level]}）`,
 						`  来源：    ${hardOffSource === "flag" ? "pi --unsafe（启动参数）" : "/safe off --hard（本窗口内选择）"}`,
 						"",
 						"  安全边界：已完全关闭（Tool-boundary Policy 与 always-on core 均未生效）",
@@ -1705,6 +1705,16 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 				return true;
 			};
 
+			/**
+			 * 面板 / 命令里「选一个等级」的统一入口。
+			 * 如果当前是 HARD-OFF，先重新开启（重新读策略 + 完整性校验 + 子代理上限）再切等级
+			 * —— 这样「完全关闭时点任一等级」就自然等于「恢复保护」。
+			 */
+			const applyLevel = async (next: Level, label: string, persistDefault = false): Promise<boolean> => {
+				if (hardOff) await rearmSafeMode(ctx, "re-enabled");
+				return setLevel(next, label, persistDefault);
+			};
+
 			const doReload = (): string[] => {
 				const before = policy?.hash;
 				applyPolicy(loadPolicy());
@@ -1737,32 +1747,50 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 					const title = [
 						`🛡 Safe Mode 设置 · v${SAFE_MODE_VERSION}`,
 						"",
-						`当前等级：${levelUi[level].icon} ${levelUi[level].name}（本窗口一直有效）`,
+						hardOff
+							? "当前状态：⛔ 完全关闭（HARD-OFF）—— 本窗口不拦截、不注入、不审计、不脱敏"
+							: `当前等级：${levelUi[level].icon} ${levelUi[level].name}（本窗口一直有效）`,
 						`新开 pi 时：${levelUi[startupLevel].icon} ${levelUi[startupLevel].name}`,
 						"",
-						"选一个等级就切换。带 ✅ 的是当前生效的。",
+						hardOff
+							? "选一个等级即重新开启保护。带 ✅ 的是当前生效的。"
+							: "选一个等级就切换。带 ✅ 的是当前生效的。",
 						"↑↓ 选择 · 回车确认 · Esc 关闭",
 					].join("\n");
 
 					const options: string[] = [];
-					const actions: Array<() => "loop" | "close"> = [];
+					const actions: Array<() => "loop" | "close" | Promise<"loop" | "close">> = [];
 
 					for (const candidate of LEVELS) {
 						const ui = levelUi[candidate];
-						const mark = candidate === level ? "✅" : "　";
+						// HARD-OFF 时没有任何等级在生效，所以四个等级都不标 ✅
+						const mark = !hardOff && candidate === level ? "✅" : "　";
 						options.push(`${mark} ${ui.icon} ${ui.name}（${LEVEL_LABEL[candidate]}）—— ${ui.hint}`);
-						actions.push(() => {
-							setLevel(candidate, `${ui.icon} ${ui.name}（${LEVEL_LABEL[candidate]}）`);
+						actions.push(async () => {
+							await applyLevel(candidate, `${ui.icon} ${ui.name}（${LEVEL_LABEL[candidate]}）`);
 							return "loop";
 						});
 					}
+
+					// 第五个选项：与四个等级并列（选择它仍会走两步人工确认，见 safe.txt §38）
+					options.push(
+						`${hardOff ? "✅" : "　"} ⛔ 完全关闭（HARD-OFF）—— 不拦截 / 不注入 / 不审计 / 不脱敏（需两步确认）`,
+					);
+					actions.push(async () => {
+						if (hardOff) {
+							notify(ctx, "🛡 当前已经是完全关闭状态，没有任何保护", "warning");
+							return "loop";
+						}
+						await doHardOff();
+						return "loop";
+					});
 
 					options.push("──────────────────────────────");
 					actions.push(() => "loop");
 
 					options.push(`　⭐ 让新开的 pi 也用「${levelUi[level].name}」`);
-					actions.push(() => {
-						setLevel(level, `启动默认 = ${levelUi[level].name}`, true);
+					actions.push(async () => {
+						await applyLevel(level, `启动默认 = ${levelUi[level].name}`, true);
 						return "loop";
 					});
 
@@ -1819,7 +1847,7 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 					if (!choice) return;
 					const index = options.indexOf(choice);
 					if (index < 0) continue;
-					if (actions[index]() === "close") return;
+					if ((await actions[index]()) === "close") return;
 				}
 			};
 
@@ -1889,15 +1917,11 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 					return;
 				}
 				case "on": {
-					if (hardOff) {
-						await rearmSafeMode(ctx, "re-enabled");
-						return;
-					}
-					setLevel(startupLevel, `ON · ${LEVEL_LABEL[startupLevel]}`);
+					await applyLevel(startupLevel, `ON · ${LEVEL_LABEL[startupLevel]}`);
 					return;
 				}
 				case "reset": {
-					setLevel(DEFAULT_LEVEL, `reset to default · ${LEVEL_LABEL[DEFAULT_LEVEL]}`, true);
+					await applyLevel(DEFAULT_LEVEL, `reset to default · ${LEVEL_LABEL[DEFAULT_LEVEL]}`, true);
 					return;
 				}
 				case "default": {
@@ -1906,14 +1930,14 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 						notify(ctx, `🛡 usage: /safe default off|low|balanced|strict  (当前启动默认：${LEVEL_LABEL[startupLevel]})`, "warning");
 						return;
 					}
-					setLevel(wanted, `startup default set to ${LEVEL_LABEL[wanted]}`, true);
+					await applyLevel(wanted, `startup default set to ${LEVEL_LABEL[wanted]}`, true);
 					return;
 				}
 				case "off": {
 					// `/safe off` = 保留 always-on core；`/safe off --hard` = 完全关闭（需两步确认）
 					const hard = argv.slice(1).some((arg) => arg === "--hard" || arg.toLowerCase() === "hard");
 					if (!hard) {
-						setLevel("off", "OFF (always-on core still enforced)");
+						await applyLevel("off", "OFF (always-on core still enforced)");
 						return;
 					}
 					await doHardOff();
@@ -1922,7 +1946,7 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 				case "low":
 				case "balanced":
 				case "strict": {
-					setLevel(sub as Level, LEVEL_LABEL[sub as Level]);
+					await applyLevel(sub as Level, LEVEL_LABEL[sub as Level]);
 					return;
 				}
 				case "subagent": {
