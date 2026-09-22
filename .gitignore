@@ -1,0 +1,24 @@
+# 运行态文件：绝不进仓库
+#   —— 这些是「这台机器」的状态，不是实现。它们不存在于仓库里，
+#      由 safe-regen.ps1 / 运行时在本机生成。
+safe-manifest.json
+safe-state.json
+safe-audit.jsonl
+safe-audit.jsonl.1
+safe-integrity.log
+backup/
+
+# 部署/测试可能产生的临时文件
+*.tmp
+*.new
+__pycache__/
+
+# 编辑器与系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# 若在仓库里跑测试并 npm i jiti
+node_modules/
+package-lock.json
