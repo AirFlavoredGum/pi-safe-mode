@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Unreleased — 版本漂移提醒确认（`acknowledgedPiVersion`）
+
+- 修一个死循环式的提醒：`safe-manifest.json` 里的 `piVersion` 只有 `safe-regen.ps1` 会改写，
+  所以「Pi 版本与基线不一致」这句提醒**单靠 `/safe verify` 永远消不掉**——你按它说的做了校验，
+  下次开 pi 它还是照旧出现（提醒里那句「请重跑 /safe verify」实际上是失效的）
+- `safe-state.json` 新增 `acknowledgedPiVersion`：只在用户**显式**做完整性校验
+  （`/safe verify` 或面板里的「✅ 重新做完整性校验」）**且校验通过**时写入；同一版本不再提醒，
+  Pi 再升级（版本号变了）→ 重新提醒一次；校验失败**不**写入，DEGRADED 每次都照常提醒
+- 状态文件改为**合并写入**（`writeStateFile`）：写 `acknowledgedPiVersion` 不会覆盖 `defaultLevel`，
+  反之亦然；继续兼容旧字段 `level`
+- 读取只降级，绝不参与裁决：文件缺失/损坏/非法 JSON/不是 JSON 对象 → 忽略并报告，
+  策略裁决不依赖状态文件；损坏文件在下次写入时自愈
+- 文档：README 说明状态文件的两类偏好字段与漂移提醒的消失条件；测试用例数同步更新
+- 测试：engine 102 → **121**（+19：合并写入互不覆盖、旧字段兼容、非法等级、空字符串、
+  非对象、损坏自愈）；e2e 181 → **188**（+7：用假 `package.json` 造出**真实**版本漂移，
+  验证「校验通过才记录 / 同进程内不重复 / 重启后仍安静 / 版本再变再提醒 / 校验失败不记录也不写文件」）
+
+> 说明：本次提交把此前只存在于**部署副本**（本机 safe-mode 目录与 Pi 镜像）里的改动收进仓库，
+> 否则下次 `install.ps1` 重装或 Pi 升级会把该特性默默丢掉。
+> 尚未写 `docs/release-notes-*.md`，也未改 `safe.txt` 或 `SAFE_MODE_VERSION`（仍为 1.3.0）。
+
 ## v1.3.0 — HARD-OFF 进入设置面板
 
 > 面向使用者的说明（含面板截图式示例、升级步骤、English summary）：[`docs/release-notes-v1.3.0.md`](docs/release-notes-v1.3.0.md)
@@ -33,11 +54,11 @@
 
 ### 新增：路径可移植（`pi-extension/paths.ts`）
 
-- 之前 `loader.ts` 默认 `SAFE_ROOT = D:\pi-agent`，`policy.ts` 里 16 条边界路径正则硬编码
-  `^d:/pi-agent/...` —— 装到别的盘符或目录时**边界路径保护会静默失效**
+- 之前 `loader.ts` 的默认 `SAFE_ROOT` 与 `policy.ts` 里 16 条边界路径正则
+  都写死了同一个固定的绝对路径 —— 装到别的盘符或目录时**边界路径保护会静默失效**
 - 现在全部路径由一个模块解析，优先级：
   `SAFE_MODE_ROOT` → `SAFE_MODE_HOME` 的父目录 → `PI_CODING_AGENT_DIR` 的父目录 →
-  镜像自身位置 → 历史默认值 `D:\pi-agent`（仅当它真实存在）
+  镜像自身位置 → 实现里的历史默认值（仅当那个目录真实存在）
 - `policy.ts` 的边界规则改由 `boundaryPathRe()` / `boundaryChildRe()` 从上述路径构造
 - `/safe doctor` 新增 `Safe root`（含来源）与 `MODE` 行，路径判定不再是黑箱
 - `safe-bootstrap.ps1` / `safe-regen.ps1` 同样按环境变量解析根目录（默认取脚本位置的上一级）
@@ -75,7 +96,7 @@
 - **`safe-regen.ps1`：镜像目录缺失时也硬报错**（否则会生成只覆盖单侧副本的隐性残缺清单）
 - **`safe-regen.ps1`：`$Root` / `$SafeHome` / `$AgentDir` 去尾部反斜杠**，
   避免用 `Substring($Root.Length)` 推相对路径时多切掉一个字符
-- `safe-regen.ps1` 结尾的 “Next:” 提示不再写死 `D:\pi-agent\...`
+- `safe-regen.ps1` 结尾的 “Next:” 提示不再写死那个绝对路径
 
 > 教训（已写进实现）：安全层的脚本里，**任何 “找不到就跳过” 的写法都是缺陷**。
 > 清单少登记一个文件不会报错，只会静静失去对该文件的篡改检测。所以现在一律 fail-loud。

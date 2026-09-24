@@ -11,7 +11,7 @@
 
 ## 一句话
 
-以前它只在你那台机器的 `D:\pi-agent` 下才真正生效；现在**装到哪都能正确保护自己的边界**，
+以前它只在一个写死的安装目录下才真正生效；现在**装到哪都能正确保护自己的边界**，
 并且多了一个**只有你本人能打开、只活一个会话**的「完全关闭」开关。
 
 ---
@@ -51,8 +51,8 @@ pi --unsafe           # 启动即完全关闭（仅本次运行）
 
 ## 新增：路径可移植（`pi-extension/paths.ts`）
 
-之前 `SAFE_ROOT` 默认写死 `D:\pi-agent`，`policy.ts` 里 16 条边界路径正则硬编码
-`^d:/pi-agent/...` —— 装到别的盘符或目录时，**边界路径保护会静默失效**（最糟的失败方式）。
+之前 `SAFE_ROOT` 默认写死成一个固定绝对路径，`policy.ts` 里 16 条边界路径正则也硬编码同一路径
+—— 装到别的盘符或目录时，**边界路径保护会静默失效**（最糟的失败方式）。
 现在所有路径由一个模块解析，优先级：
 
 | 顺序 | 来源 |
@@ -61,7 +61,7 @@ pi --unsafe           # 启动即完全关闭（仅本次运行）
 | 2 | `SAFE_MODE_HOME` 的父目录 |
 | 3 | `PI_CODING_AGENT_DIR` 的父目录（pi 自己导出，零配置） |
 | 4 | 镜像自身位置（`<root>\agent\extensions\safe-mode\…` 反推） |
-| 5 | 历史默认值 `D:\pi-agent`（仅当它真实存在） |
+| 5 | 实现里的历史默认值（仅当那个目录真实存在） |
 
 边界规则改由 `boundaryPathRe()` / `boundaryChildRe()` 从上述路径构造。
 `/safe doctor` 新增 `Safe root: <路径>（来源）` 与 `MODE` 行 —— 路径判定不再是黑箱。
@@ -106,7 +106,7 @@ pi --unsafe           # 启动即完全关闭（仅本次运行）
 - **`safe-regen.ps1`：镜像目录缺失时也硬报错**，否则会生成只覆盖单侧副本的隐性残缺清单。
 - **`safe-regen.ps1`：`$Root` / `$SafeHome` / `$AgentDir` 去掉尾部反斜杠**，
   避免按前缀推导相对路径时多切一个字符。
-- `safe-regen.ps1` 结尾的 “Next:” 提示不再写死 `D:\pi-agent\...`。
+- `safe-regen.ps1` 结尾的 “Next:” 提示不再写死那个绝对路径。
 
 > 教训（已写进实现）：安全层的脚本里，**任何「找不到就跳过」的写法都是缺陷**。
 > 清单少登记一个文件不会报错，只会静静失去对该文件的篡改检测。所以现在一律 fail-loud。
@@ -116,23 +116,23 @@ pi --unsafe           # 启动即完全关闭（仅本次运行）
 ## 安装
 
 ```powershell
-git clone https://github.com/AirFlavoredGum/pi-safe-mode.git D:\pi-safe-mode
+git clone https://github.com/AirFlavoredGum/pi-safe-mode.git <仓库位置>\pi-safe-mode
 
 # 先看它要做什么（只读，不写盘）
-powershell -NoProfile -ExecutionPolicy Bypass -File D:\pi-safe-mode\install.ps1 -Root D:\pi-agent -WhatIf
+powershell -NoProfile -ExecutionPolicy Bypass -File <仓库位置>\pi-safe-mode\install.ps1 -Root <Pi 根目录> -WhatIf
 
 # 真正安装
-powershell -NoProfile -ExecutionPolicy Bypass -File D:\pi-safe-mode\install.ps1 -Root D:\pi-agent
+powershell -NoProfile -ExecutionPolicy Bypass -File <仓库位置>\pi-safe-mode\install.ps1 -Root <Pi 根目录>
 ```
 
 `-Root` 指**包含 `safe-mode\` 目录的那一级**。然后按脚本提示做两步：
 
 ```powershell
 # 生成完整性清单（会让你键入 yes —— 只有人能把当前文件认定为可信基线）
-powershell -NoProfile -File D:\pi-agent\safe-mode\safe-regen.ps1
+powershell -NoProfile -File <Pi 根目录>\safe-mode\safe-regen.ps1
 
 # 把镜像与规范副本对齐
-powershell -NoProfile -File D:\pi-agent\safe-mode\safe-bootstrap.ps1 -Fix
+powershell -NoProfile -File <Pi 根目录>\safe-mode\safe-bootstrap.ps1 -Fix
 ```
 
 打开 pi → `/safe doctor`，看到 `Integrity: integrity OK` 即完成。

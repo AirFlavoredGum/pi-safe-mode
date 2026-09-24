@@ -129,38 +129,72 @@ function parseSections(text: string): PolicySection[] {
 }
 
 /**
- * 读取**启动默认等级**（状态文件不是策略源，只存默认偏好）。
- * 兼容旧字段 `level`。
+ * 状态文件（`safe-state.json`）——**不是**策略源，只存两类用户偏好：
+ *   · defaultLevel            启动默认等级
+ *   · acknowledgedPiVersion   「版本漂移提醒」已被用户确认过的 Pi 版本
+ * 读失败一律降级：策略裁决绝不依赖它。
  */
-export function loadStateDefault(): { level?: Level; error?: string } {
-	if (!existsSync(SAFE_STATE_PATH)) return {};
+type SafeState = Record<string, unknown>;
+
+function readStateFile(): { data: SafeState; error?: string } {
+	if (!existsSync(SAFE_STATE_PATH)) return { data: {} };
 	try {
-		const parsed = JSON.parse(readFileSync(SAFE_STATE_PATH, "utf8").replace(/^\uFEFF/, "")) as {
-			defaultLevel?: unknown;
-			level?: unknown;
-		};
-		const raw = parsed?.defaultLevel ?? parsed?.level;
-		const value = typeof raw === "string" ? raw.toLowerCase() : undefined;
-		if (value && isLevel(value)) return { level: value };
-		return { error: `state file has an invalid default level: ${JSON.stringify(raw)}` };
+		const parsed: unknown = JSON.parse(readFileSync(SAFE_STATE_PATH, "utf8").replace(/^\uFEFF/, ""));
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return { data: {}, error: "state file is not a JSON object" };
+		}
+		return { data: parsed as SafeState };
 	} catch (error) {
-		return { error: `state file unreadable: ${error instanceof Error ? error.message : String(error)}` };
+		return { data: {}, error: `state file unreadable: ${error instanceof Error ? error.message : String(error)}` };
 	}
 }
 
-/** 写入**启动默认等级**（仅在用户显式执行 `/safe default <level>` 或 `/safe reset` 时触发） */
-export function saveStateDefault(level: Level): { ok: boolean; error?: string } {
+/** 合并写回状态文件：只覆盖传入字段，其余原样保留 */
+function writeStateFile(patch: SafeState): { ok: boolean; error?: string } {
 	try {
-		const payload = {
-			version: 2,
-			defaultLevel: level,
-			updatedAt: new Date().toISOString(),
-		};
+		const { data } = readStateFile();
+		const payload = { ...data, version: 2, ...patch, updatedAt: new Date().toISOString() };
 		writeFileSync(SAFE_STATE_PATH, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 		return { ok: true };
 	} catch (error) {
 		return { ok: false, error: error instanceof Error ? error.message : String(error) };
 	}
+}
+
+/**
+ * 读取状态文件：启动默认等级 + 已确认过的 Pi 版本。
+ * 兼容旧字段 `level`。
+ */
+export function loadState(): { level?: Level; acknowledgedPiVersion?: string; error?: string } {
+	const { data, error } = readStateFile();
+	const out: { level?: Level; acknowledgedPiVersion?: string; error?: string } = {};
+	if (typeof data.acknowledgedPiVersion === "string" && data.acknowledgedPiVersion) {
+		out.acknowledgedPiVersion = data.acknowledgedPiVersion;
+	}
+	const raw = data.defaultLevel ?? data.level;
+	const value = typeof raw === "string" ? raw.toLowerCase() : undefined;
+	if (value && isLevel(value)) {
+		out.level = value;
+	} else if (raw !== undefined) {
+		out.error = `state file has an invalid default level: ${JSON.stringify(raw)}`;
+	} else if (error) {
+		out.error = error;
+	}
+	return out;
+}
+
+/** 写入**启动默认等级**（仅在用户显式执行 `/safe default <level>` 或 `/safe reset` 时触发） */
+export function saveStateDefault(level: Level): { ok: boolean; error?: string } {
+	return writeStateFile({ defaultLevel: level });
+}
+
+/**
+ * 记录「这个 Pi 版本的漂移提醒已经被用户确认过」。
+ * 只在用户显式做完完整性校验**且校验通过**时调用 —— 让提示里那句「请重跑 /safe verify」
+ * 真的能生效（manifest 里的 piVersion 只有 safe-regen.ps1 会改写，否则提醒会每次开 pi 都重复）。
+ */
+export function saveAcknowledgedPiVersion(version: string): { ok: boolean; error?: string } {
+	return writeStateFile({ acknowledgedPiVersion: version });
 }
 
 /**

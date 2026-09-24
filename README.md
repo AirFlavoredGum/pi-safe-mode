@@ -22,21 +22,25 @@ ALLOW / CONFIRM / DENY 裁决（内建工具、扩展工具、MCP 工具都覆�
 
 ```powershell
 # 1) 取到仓库
-git clone https://github.com/AirFlavoredGum/pi-safe-mode.git D:\pi-safe-mode
+git clone https://github.com/AirFlavoredGum/pi-safe-mode.git <仓库位置>\pi-safe-mode
 
 # 2) 装到你的 Pi 根目录（先加 -WhatIf 可以只看它会做什么）
-powershell -NoProfile -ExecutionPolicy Bypass -File D:\pi-safe-mode\install.ps1 -Root D:\pi-agent
+powershell -NoProfile -ExecutionPolicy Bypass -File <仓库位置>\pi-safe-mode\install.ps1 -Root <Pi 根目录>
 ```
 
 `-Root` 指的是**包含 `safe-mode\` 目录的那一级**。装完后按脚本提示做两件事：
 
 ```powershell
-# 3) 生成完整性清单（会让你键入 yes —— 这是刻意的：只有人能把当前文件认定为可信基线）
-powershell -NoProfile -File D:\pi-agent\safe-mode\safe-regen.ps1
+# 3) 先把镜像与规范副本对齐
+powershell -NoProfile -File <Pi 根目录>\safe-mode\safe-bootstrap.ps1 -Fix
 
-# 4) 把镜像与规范副本对齐
-powershell -NoProfile -File D:\pi-agent\safe-mode\safe-bootstrap.ps1 -Fix
+# 4) 再生成完整性清单（会让你键入 yes —— 这是刻意的：只有人能把当前文件认定为可信基线）
+powershell -NoProfile -File <Pi 根目录>\safe-mode\safe-regen.ps1
 ```
+
+顺序不能颠倒：`safe-regen.ps1` 记录的是**两份副本**里每个文件的哈希。先 regen 会把镜像的
+**旧文件**记进基线，紧接着 `-Fix` 又把镜像改成新文件—— 清单于是与自己的安装对不上，
+`bootstrap` 会报 4 项 hash mismatch。先把镜像同步好，基线才能一次记准。
 
 打开 pi，输入 `/safe doctor`，看到 `Integrity: integrity OK` 就成了。
 不想写盘只想体检：`safe-bootstrap.ps1 -VerifyOnly`。
@@ -51,7 +55,7 @@ powershell -NoProfile -File D:\pi-agent\safe-mode\safe-bootstrap.ps1 -Fix
 | 2 | `SAFE_MODE_HOME` 的父目录 | 只指定了 Safe Mode 家目录时反推 |
 | 3 | `PI_CODING_AGENT_DIR` 的父目录 | pi 自己导出的变量（零配置） |
 | 4 | 镜像自身位置 | 由 `<root>\agent\extensions\safe-mode\…` 反推 |
-| 5 | `D:\pi-agent` | 历史默认值（仅当它真实存在） |
+| 5 | 实现里的历史默认值 | 仅当那个目录真实存在时生效（见 `paths.ts` 的 `LEGACY_ROOT`） |
 
 策略表里的边界规则（16 条）也全部由这些路径构造，所以装到任何盘符都照常保护。
 `/safe doctor` 会显示 `Safe root: <路径>（来源）`，路径判定永远可自查。
@@ -194,9 +198,13 @@ pi --no-safe               本次启动临时关闭（不改启动默认）
 
 所以：某次 `/safe off` 或 `/safe strict` **不会**影响新开的 pi —— 新开的 pi 用「新开 pi 时的等级」。
 
-状态文件：`D:\pi-agent\safe-mode\safe-state.json`（只存**启动默认等级**）。
+状态文件：`<Pi 根目录>\safe-mode\safe-state.json`（只存两类**偏好**：启动默认等级 + 「已确认的版本漂移」）。
 它**不是**策略源；受 `iron.boundary-write` 保护（模型改写它必须经你确认）；
-**不**纳入 manifest。文件不存在/损坏 → 自动回到出厂值 `BALANCED`。
+**不**纳入 manifest。文件不存在/损坏 → 自动回到出厂值 `BALANCED`（已确认的漂移提醒随之重置）。
+
+其中 `acknowledgedPiVersion` 只在两种情况下写入：你显式执行 `/safe verify`（或面板里的
+「✅ 重新做完整性校验」）**且校验通过**时。它只决定同一条漂移提醒要不要重复出现，
+不参与任何裁决；校验失败时**不**写入，所以 DEGRADED 会每次都照常提醒。
 
 ---
 
@@ -223,7 +231,7 @@ pi --no-safe               本次启动临时关闭（不改启动默认）
 
 | 层 | 位置 | 作用 |
 | --- | --- | --- |
-| L1 | `D:\pi-agent\safe-mode\safe-bootstrap.ps1` + `safe-launch.cmd` | **唯一能发现"扩展整体消失"的机制**。校验 safe.txt + 逐文件比对规范副本/镜像 + 检查 settings.json 未强制排除 safe-mode + 记录 Pi 版本；镜像被改则从规范副本恢复；失败则**不启动 Pi** |
+| L1 | `<Pi 根目录>\safe-mode\safe-bootstrap.ps1` + `safe-launch.cmd` | **唯一能发现"扩展整体消失"的机制**。校验 safe.txt + 逐文件比对规范副本/镜像 + 检查 settings.json 未强制排除 safe-mode + 记录 Pi 版本；镜像被改则从规范副本恢复；失败则**不启动 Pi** |
 | L2 | 扩展内 `verifyIntegrity()` | `session_start` / `/safe verify` / `/safe reload`，以及 **safe.txt 内容真的变了之后自动复验一次**；校验 safe.txt hash、manifest、manifest schema 版本、自身源码 hash、策略自检（内置危险样本必须 DENY）。它**不在每一次工具调用上跑**（热路径只做 `statSync` 签名判断，≈0.005 ms） |
 | L3 | 更新后重检 | 检测到 Pi 更新 / 扩展变更 / `/reload` 后重新执行 L2 并报告 |
 
@@ -237,16 +245,16 @@ pi --no-safe               本次启动临时关闭（不改启动默认）
 ## 5. 文件布局
 
 **所有 Safe Mode 文件都在 Safe Mode 家目录下**（Pi Home 之外，Pi 更新碰不到）。
-下面用 `D:\pi-agent` 表示 Pi 根目录；你的实际位置以 `/safe doctor` 的 `Safe root` 行为准
+下面用 `<Pi 根目录>` 占位你的实际安装位置；实际路径以 `/safe doctor` 的 `Safe root` 行为准
 （`SAFE_MODE_ROOT` / `SAFE_MODE_HOME` / `PI_CODING_AGENT_DIR` 都可以改它）：
 
 ```
-D:\pi-agent\
+<Pi 根目录>\
 ├─ safe-mode\                        ← Safe Mode 的家（Pi Home 之外）
 │   ├─ safe.txt                      策略源（唯一权威）
 │   ├─ safe.txt.bak                  人工回滚备份（惰性，运行时从不加载）
 │   ├─ safe-manifest.json            完整性基线（只存哈希）
-│   ├─ safe-state.json               新开 pi 时的默认等级（偏好，不是策略）
+│   ├─ safe-state.json               偏好：新开 pi 时的默认等级 + 已确认的版本漂移（不是策略）
 │   ├─ safe-audit.jsonl             决策审计（JSONL，只记有裁决的事件；超过 2 MB 轮转为 .1）
 │   ├─ safe-integrity.log            L1 校验日志
 │   ├─ safe-bootstrap.ps1            L1 校验 / 自动恢复
@@ -272,27 +280,29 @@ D:\pi-agent\
 | `safe.txt` | 会在 Pi 扩展目录里出现**第二份策略副本**，破坏"唯一权威源" |
 
 因此它们是刻意排除在哈希之外的；`safe.txt` 通过 `policySha256` 单独登记，
-而 `safe-manifest.json` 另外记录生成时的 `piVersion`（仅用于启动时的版本漂移提醒，**不**做兼容性判定）。
+而 `safe-manifest.json` 另外记录生成时的 `piVersion`（仅用于启动时的版本漂移提醒，**不**做兼容性判定）；
+该提醒在 `/safe verify` 校验通过并写入 `safe-state.json` 的 `acknowledgedPiVersion` 后不再重复
+（Pi 再升级 → 版本号变了 → 重新提醒一次）。
 
 ---
 
 ## 6. 修改 safe.txt / 修改 Safe Mode 实现之后
 
-1. 编辑规范实现：**`D:\pi-agent\safe-mode\pi-extension\`**（不要直接改镜像 —— 镜像由 bootstrap 恢复）
+1. 编辑规范实现：**`<Pi 根目录>\safe-mode\pi-extension\`**（不要直接改镜像 —— 镜像由 bootstrap 恢复）
 2. **同步镜像**（清单同时冻结两边，所以必须先同步再 regen）：
    ```powershell
-   powershell -NoProfile -File D:\pi-agent\safe-mode\safe-bootstrap.ps1 -Fix
+   powershell -NoProfile -File <Pi 根目录>\safe-mode\safe-bootstrap.ps1 -Fix
    ```
    此步会因清单还是旧的而报 `FAILED` —— **这是预期的**，只要它把镜像修好即可。
 3. 重新生成清单：
    ```powershell
-   powershell -NoProfile -File D:\pi-agent\safe-mode\safe-regen.ps1
+   powershell -NoProfile -File <Pi 根目录>\safe-mode\safe-regen.ps1
    ```
    在弹出的提示处键入 `yes`。
    （`safe-regen.ps1` 必须由**你**手动确认；它会把当前文件状态认定为可信基线，不会自动触发）
 4. 只读复核（**此开关不写任何文件**，不修复镜像也不写日志）：
    ```powershell
-   powershell -NoProfile -File D:\pi-agent\safe-mode\safe-bootstrap.ps1 -VerifyOnly
+   powershell -NoProfile -File <Pi 根目录>\safe-mode\safe-bootstrap.ps1 -VerifyOnly
    ```
    看到 `RESULT: OK` 即可。
 5. 在 Pi 里 `/safe verify`（或 `/safe reload`），顺手 `/safe check` 看规则自检。
@@ -330,10 +340,10 @@ D:\pi-agent\
 | 方式 | 适用 |
 | --- | --- |
 | **`pi`** | 日常。扩展自动加载 → Safe Mode 默认开启，L2 运行时校验照常工作 |
-| `D:\pi-agent\safe-mode\safe-launch.cmd` | 需要额外保证时（改过配置 / 装过扩展 / 更新过 Pi 之后）。多一层 L1：能发现"扩展整体消失"、自动修复镜像、失败则拒绝启动 |
+| `<Pi 根目录>\safe-mode\safe-launch.cmd` | 需要额外保证时（改过配置 / 装过扩展 / 更新过 Pi 之后）。多一层 L1：能发现"扩展整体消失"、自动修复镜像、失败则拒绝启动 |
 | `pi --no-safe` | 一次性关闭本次会话（不改变已记住的等级） |
-| `powershell -NoProfile -File D:\pi-agent\safe-mode\safe-bootstrap.ps1 -VerifyOnly` | 只做 L1 体检，**不写任何文件**（不修复镜像、不写日志）；看到 `RESULT: OK` 即可 |
-| `powershell -NoProfile -File D:\pi-agent\safe-mode\safe-bootstrap.ps1 -Fix` | 校验并把镜像从规范副本恢复（写 `safe-integrity.log`） |
+| `powershell -NoProfile -File <Pi 根目录>\safe-mode\safe-bootstrap.ps1 -VerifyOnly` | 只做 L1 体检，**不写任何文件**（不修复镜像、不写日志）；看到 `RESULT: OK` 即可 |
+| `powershell -NoProfile -File <Pi 根目录>\safe-mode\safe-bootstrap.ps1 -Fix` | 校验并把镜像从规范副本恢复（写 `safe-integrity.log`） |
 
 ## 9. 事件与钩子（实现说明）
 
@@ -414,8 +424,8 @@ pi-safe-mode/
 测试不绑定安装位置（`tests/harness.mjs` 自动发现 pi 与 jiti）：
 
 ```powershell
-node <safe-mode>\pi-extension\tests\engine.test.mjs   # 策略引擎 + 归一化 + 审计（102 项）
-node <safe-mode>\pi-extension\tests\e2e.test.mjs      # 运行时端到端 + HARD-OFF + 面板（181 项）
+node <safe-mode>\pi-extension\tests\engine.test.mjs   # 策略引擎 + 归一化 + 审计 + 状态文件（121 项）
+node <safe-mode>\pi-extension\tests\e2e.test.mjs      # 运行时端到端 + HARD-OFF + 面板 + 版本漂移提醒（188 项）
 ```
 
 解析不到时用环境变量指定：`SAFE_TEST_JITI`、`SAFE_TEST_PI_ROOT`、`SAFE_TEST_IMPL_DIR`、

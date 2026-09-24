@@ -4,7 +4,7 @@
   做四件事：
     1. 解析目标位置（SAFE_MODE_ROOT / PI_CODING_AGENT_DIR / -Root，与 paths.ts 同一套规则）
     2. 把 safe.txt、三个脚本、pi-extension\ 复制到 <root>\safe-mode\
-    3. 打印接下来你必须**亲手**做的两步（同步镜像 + 生成清单）
+    3. 打印接下来你必须**亲手**做的两步（先同步镜像，再生成清单 —— **顺序不能颠倒**）
     4. 不碰任何运行态文件（safe-manifest.json / safe-state.json / 审计 / 日志）
 
   为什么不让脚本顺手把清单也生成了：
@@ -13,13 +13,13 @@
 
   用法：
     # 首次安装（默认装到 Pi 根目录下的 safe-mode\）
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Root D:\pi-agent
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Root <Pi 根目录>
 
     # 覆盖已有安装（会提醒你先备份）
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Root D:\pi-agent -Force
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Root <Pi 根目录> -Force
 
     # 只看看会做什么
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Root D:\pi-agent -WhatIf
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Root <Pi 根目录> -WhatIf
 #>
 [CmdletBinding()]
 param(
@@ -105,11 +105,15 @@ if (-not (Test-Path -LiteralPath $MirrorDir)) {
 $bootstrap = Join-Path $SafeHome 'safe-bootstrap.ps1'
 $regen = Join-Path $SafeHome 'safe-regen.ps1'
 Write-Host ''
-Write-Host 'Next steps (both are intentionally manual):' -ForegroundColor Yellow
-Write-Host "  1. powershell -NoProfile -File `"$regen`"" -ForegroundColor Yellow
-Write-Host '     (type yes at the prompt — this makes the files you just installed the trusted baseline)' -ForegroundColor Yellow
-Write-Host "  2. powershell -NoProfile -File `"$bootstrap`" -Fix" -ForegroundColor Yellow
-Write-Host '     (syncs the Pi extension mirror from the canonical copy)' -ForegroundColor Yellow
+Write-Host 'Next steps (both are intentionally manual — and in THIS order):' -ForegroundColor Yellow
+Write-Host "  1. powershell -NoProfile -File `"$bootstrap`" -Fix" -ForegroundColor Yellow
+Write-Host '     (syncs the Pi extension mirror from the canonical copy you just installed)' -ForegroundColor Yellow
+Write-Host "  2. powershell -NoProfile -File `"$regen`"" -ForegroundColor Yellow
+Write-Host '     (type yes at the prompt — this freezes BOTH copies as the trusted baseline)' -ForegroundColor Yellow
+Write-Host ''
+Write-Host 'Why this order: safe-regen.ps1 records the hash of every file in BOTH copies.' -ForegroundColor DarkGray
+Write-Host 'Regenerate first and the baseline would capture the mirror''s OLD files; the next' -ForegroundColor DarkGray
+Write-Host '-Fix would then change them again, leaving the manifest mismatching its own install.' -ForegroundColor DarkGray
 Write-Host ''
 Write-Host "Then start pi and run /safe doctor — expect: Integrity: integrity OK" -ForegroundColor Green
 Write-Host 'To check without writing anything: safe-bootstrap.ps1 -VerifyOnly' -ForegroundColor Green

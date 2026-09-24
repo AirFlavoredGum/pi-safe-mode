@@ -9,7 +9,7 @@
  * 覆盖：策略引擎行为矩阵 + 路径归一化 + 审计日志 + canonical/mirror 一致性。
  * 注意：/safe 的 HARD-OFF（完全关闭）是扩展层行为，由 e2e.test.mjs 覆盖。
  */
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ROOT, RAW, agentDir, implDir, isWin, jiti, mirrorDir, safeHome, info } from "./harness.mjs";
@@ -18,6 +18,11 @@ import { ROOT, RAW, agentDir, implDir, isWin, jiti, mirrorDir, safeHome, info } 
 const AUDIT_FILE = join(tmpdir(), "safe-mode-engine-audit.jsonl");
 process.env.SAFE_MODE_AUDIT = AUDIT_FILE;
 if (existsSync(AUDIT_FILE)) rmSync(AUDIT_FILE);
+
+// 状态文件同样重定向：测试绝不能写真正的 safe-state.json（那是用户偏好，不是策略源）
+const STATE_FILE = join(tmpdir(), "safe-mode-engine-state.json");
+process.env.SAFE_MODE_STATE = STATE_FILE;
+if (existsSync(STATE_FILE)) rmSync(STATE_FILE);
 
 info();
 /** 只有在测试「已部署」的规范副本时，canonical 与 mirror 才应该逐字节一致 */
@@ -273,7 +278,41 @@ if (!deployed) {
 	check("canonical index.ts == mirror index.ts (byte-for-byte)", a.equals(b), true);
 }
 
+// ---- 12. 新增：状态文件（启动默认等级 + 已确认的 Pi 版本，合并写入互不覆盖） ----
+// 背景：/safe verify 通过后要记下「这个 Pi 版本的漂移提醒已确认」，但同一个文件里还存着
+// defaultLevel。两者必须互不覆盖；且状态文件读失败只降级，绝不参与策略裁决。
+const writeState = (text) => writeFileSync(STATE_FILE, text, "utf8");
+const readState = () => JSON.parse(readFileSync(STATE_FILE, "utf8"));
+check("state path honours SAFE_MODE_STATE", loader.SAFE_STATE_PATH, STATE_FILE);
+check("loadState on a missing file returns nothing (never throws)", JSON.stringify(loader.loadState()), "{}");
+check("saveStateDefault writes defaultLevel", loader.saveStateDefault("low").ok, true);
+check("state file is a versioned JSON object", readState().version, 2);
+check("defaultLevel round-trips", loader.loadState().level, "low");
+check("saveAcknowledgedPiVersion writes the version", loader.saveAcknowledgedPiVersion("0.87.1").ok, true);
+check("acknowledgedPiVersion round-trips", loader.loadState().acknowledgedPiVersion, "0.87.1");
+check("acknowledging does not clobber defaultLevel", loader.loadState().level, "low");
+loader.saveStateDefault("strict");
+check("writing defaultLevel does not clobber the acknowledged version", loader.loadState().acknowledgedPiVersion, "0.87.1");
+check("writing defaultLevel still applies the new level", loader.loadState().level, "strict");
+writeState(JSON.stringify({ version: 2, level: "strict" }));
+check("legacy `level` field is honoured as defaultLevel", loader.loadState().level, "strict");
+writeState(JSON.stringify({ defaultLevel: "nope" }));
+const badLevel = loader.loadState();
+check("invalid defaultLevel is reported, not silently accepted", typeof badLevel.error === "string", true);
+check("invalid defaultLevel yields no level", badLevel.level, undefined);
+writeState(JSON.stringify({ defaultLevel: "low", acknowledgedPiVersion: "" }));
+check("empty acknowledgedPiVersion is ignored", loader.loadState().acknowledgedPiVersion, undefined);
+writeState("[1,2,3]");
+check("non-object state file is reported as an error", typeof loader.loadState().error === "string", true);
+writeState("{ not json");
+check("corrupt state file is reported (never thrown)", typeof loader.loadState().error === "string", true);
+check("a write after corruption still succeeds (self-heal)", loader.saveAcknowledgedPiVersion("9.9.9").ok, true);
+const healed = readState();
+check("self-healed file keeps only known fields", Object.keys(healed).sort().join(","), "acknowledgedPiVersion,updatedAt,version");
+check("self-healed file carries no stale defaultLevel", healed.defaultLevel, undefined);
+
 if (existsSync(AUDIT_FILE)) rmSync(AUDIT_FILE);
+if (existsSync(STATE_FILE)) rmSync(STATE_FILE);
 
 console.log("");
 console.log(failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`);

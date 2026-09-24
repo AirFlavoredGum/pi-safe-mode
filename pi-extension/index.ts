@@ -37,11 +37,12 @@ import {
 	appendAudit,
 	auditSize,
 	loadPolicy,
-	loadStateDefault,
+	loadState,
 	policySignature,
 	readAuditTail,
 	readManifestMeta,
 	readPiVersion,
+	saveAcknowledgedPiVersion,
 	saveStateDefault,
 	shortHash,
 } from "./loader.ts";
@@ -137,6 +138,12 @@ let lastWidgetLines: string[] | undefined;
 /** 当前 Pi 版本 / manifest 元信息（只用于状态显示与版本漂移提醒，不参与裁决） */
 let piVersion: string | undefined;
 let manifestMeta: { version?: number; generatedAt?: string; piVersion?: string } = {};
+
+/**
+ * 已经确认过「版本漂移提醒」的 Pi 版本（读自 safe-state.json 的 acknowledgedPiVersion）。
+ * 只决定同一条提醒要不要重复出现，不参与裁决，也不影响完整性判定。
+ */
+let acknowledgedPiVersion: string | undefined;
 
 /** 工具名 → 来源（builtin / sdk / 扩展包名），只在 tool_call 命中未知工具时才刷新 */
 let toolSources = new Map<string, string>();
@@ -804,6 +811,29 @@ function runIntegrity(): IntegrityReport {
 	return report;
 }
 
+/** 重新读取 Pi 版本 / manifest 元信息（只影响状态显示与漂移提醒，不参与裁决） */
+function refreshVersionMeta(): void {
+	piVersion = readPiVersion();
+	manifestMeta = readManifestMeta();
+}
+
+/**
+ * 「当前 Pi 版本的漂移提醒已被确认」——只在用户显式做完整性校验且**校验通过**时调用。
+ *
+ * 目的：让提醒里那句「请重跑 /safe verify」真的能生效。manifest 里的 piVersion 只有
+ * safe-regen.ps1 会改写，单靠 /safe verify 永远消不掉提醒，于是每次开 pi 都重复一次。
+ * 这里把「已确认的版本」记进 safe-state.json：同一个版本不再提醒；Pi 再升级 →
+ * 版本号变了 → 重新提醒一次。校验失败时**不**记录，DEGRADED 每次都照常提醒。
+ */
+function acknowledgePiVersionDrift(): string | undefined {
+	if (!piVersion || piVersion === acknowledgedPiVersion) return undefined;
+	if (!manifestMeta.piVersion || manifestMeta.piVersion === piVersion) return undefined;
+	const saved = saveAcknowledgedPiVersion(piVersion);
+	if (!saved.ok) return `   版本漂移已确认，但写入状态文件失败：${saved.error}`;
+	acknowledgedPiVersion = piVersion;
+	return `   已确认 Pi ${piVersion} 与基线 ${manifestMeta.piVersion} 的差异（同一版本不再重复提醒；Pi 再升级会重新提醒）`;
+}
+
 /** 完整性未确认时的 fail-closed：只拦"高风险"（即已产生裁决的操作） */
 function integrityBlocks(verdict: Verdict): boolean {
 	if (!integrity || integrity.ok) return false;
@@ -1254,8 +1284,7 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 		applyPolicy(loadPolicy());
 		const report = runIntegrity();
 		// 版本 / 来源元信息（仅用于状态显示与漂移提醒，不参与裁决）
-		piVersion = readPiVersion();
-		manifestMeta = readManifestMeta();
+		refreshVersionMeta();
 		refreshToolSources(pi);
 		await setupSubagentCeiling(ctx);
 		applySubagentPolicy();
@@ -1340,9 +1369,10 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 		hardOffSource = undefined;
 
 		// 出厂默认（写在新开 pi 时的生效等级）。本次窗口内的切换不写状态文件。
-		const state = loadStateDefault();
+		const state = loadState();
 		startupLevelError = state.error;
 		startupLevel = state.level ?? DEFAULT_LEVEL;
+		acknowledgedPiVersion = state.acknowledgedPiVersion;
 
 		// 关键：为保「本窗口一直用你选的等级」，内部重载必须恢复之前的选择。
 		const keepFromWindow = event.reason === "reload";
@@ -1382,10 +1412,17 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 		}
 
 		// 版本漂移：Pi 变了，或 manifest schema 不是本实现支持的那一代
-		if (piVersion && manifestMeta.piVersion && piVersion !== manifestMeta.piVersion) {
+		// 同一个 Pi 版本只提醒一次：跑过 /safe verify（校验通过）即记为「已确认」，
+		// Pi 再升级时版本号变化 → 重新提醒一次。
+		if (
+			piVersion &&
+			manifestMeta.piVersion &&
+			piVersion !== manifestMeta.piVersion &&
+			piVersion !== acknowledgedPiVersion
+		) {
 			notify(
 				ctx,
-				`🛡 Safe Mode: Pi 版本已从 ${manifestMeta.piVersion} 变为 ${piVersion}，请重跑 /safe verify（或 safe-launch.cmd）重新确认完整性`,
+				`🛡 Safe Mode: Pi 版本已从 ${manifestMeta.piVersion} 变为 ${piVersion}。跑一次 /safe verify（校验通过即确认，之后不再重复提醒）；或用 safe-regen.ps1 更新基线。`,
 				"warning",
 			);
 		}
@@ -1662,9 +1699,11 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 				);
 				for (const engine of engines) lines.push(`      · ${engine}`);
 				if (piVersion && manifestMeta.piVersion && piVersion !== manifestMeta.piVersion) {
-					lines.push(
-						`   Version drift: Pi ${manifestMeta.piVersion} -> ${piVersion}. Re-run /safe verify or safe-launch.cmd.`,
-					);
+					const ack =
+						acknowledgedPiVersion === piVersion
+							? "ACKNOWLEDGED via /safe verify — no repeat reminder"
+							: "NOT acknowledged — /safe verify acknowledges it (safe-regen.ps1 rewrites the baseline)";
+					lines.push(`   Version drift: Pi ${manifestMeta.piVersion} -> ${piVersion}. ${ack}`);
 				}
 				if (policyState === "unavailable") {
 					lines.push("", "Safe Mode cannot be reliably enabled because safe.txt could not be loaded.");
@@ -1733,11 +1772,17 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 			const doVerify = (): string[] => {
 				const report = runIntegrity();
 				applyPolicy(loadPolicy());
+				refreshVersionMeta();
 				refreshStatus(ctx);
 				const lines = [`🛡 完整性校验：${report.ok ? "正常" : "异常"}`, `   ${report.summary}`];
 				for (const p of report.problems) lines.push(`   · [${p.kind}] ${p.detail}`);
 				const test = selfTest();
 				lines.push(`   策略自检：${test.ok ? "通过" : "失败"} — ${test.detail}`);
+				// 只有校验通过才把当前 Pi 版本记为「已确认」；校验失败时继续每次提醒
+				if (report.ok) {
+					const ack = acknowledgePiVersionDrift();
+					if (ack) lines.push(ack);
+				}
 				return lines;
 			};
 
@@ -1834,7 +1879,14 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 					options.push("　✅ 重新做完整性校验");
 					actions.push(() => {
 						const report = runIntegrity();
-						notify(ctx, report.ok ? "🛡 完整性正常" : `🛡 完整性异常：${report.summary}`, report.ok ? "info" : "error");
+						refreshVersionMeta();
+						refreshStatus(ctx);
+						const ack = report.ok ? acknowledgePiVersionDrift() : undefined;
+						notify(
+							ctx,
+							report.ok ? `🛡 完整性正常${ack ? " · 版本漂移已确认" : ""}` : `🛡 完整性异常：${report.summary}`,
+							report.ok ? "info" : "error",
+						);
 						return "loop";
 					});
 

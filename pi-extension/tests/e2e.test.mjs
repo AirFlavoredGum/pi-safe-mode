@@ -8,7 +8,7 @@
  * 默认加载**镜像副本**（pi 实际加载的那一份）；用 SAFE_TEST_LOAD_DIR 可以指向别的副本。
  * 等级状态文件与审计日志都被重定向到临时目录，不会触碰真实安全目录。
  */
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { implDir, jiti, loadDir, manifestPath, safeHome, info } from "./harness.mjs";
@@ -652,11 +652,67 @@ confirmAnswer = false;
 inputAnswer = undefined;
 
 // ===========================================================================
+// 26) 版本漂移提醒的「已确认」状态（造出真实漂移：假 package.json + 重新加载实现）
+// ===========================================================================
+// 现实中 Pi 版本与 manifest 基线一致（无漂移），此时 acknowledgePiVersionDrift() 不该写任何东西。
+// 把 Pi 版本指向一个假 package.json 就造出了真漂移，于是能验证四条规则：
+//   校验通过才记录 / 同一版本不重复 / 重启后仍安静（读状态文件）/ 版本再变再提醒
+// 注意：本节会故意触发一次策略加载失败（UNAVAILABLE）来验证「校验失败不记录」，
+//       所以完整性统计先在这里定格，避免把故意制造的故障当成真故障。
+const degradedBeforeDrift = notices.filter((n) => /DEGRADED|UNAVAILABLE/.test(n));
+const FAKE_PKG_DIR = join(tmpdir(), "safe-mode-drift-pi", "node_modules", "@earendil-works", "pi-coding-agent");
+const FAKE_PKG_JSON = join(FAKE_PKG_DIR, "package.json");
+const writeFakePiVersion = (version) => {
+	mkdirSync(FAKE_PKG_DIR, { recursive: true });
+	writeFileSync(FAKE_PKG_JSON, JSON.stringify({ name: "@earendil-works/pi-coding-agent", version }), "utf8");
+};
+/** 重新加载实现（moduleCache:false → paths.ts 重新求值，带上当前环境）并跑一次 /safe verify */
+const freshInstance = async () => {
+	const instance = await jiti.import(LOAD_TARGET, { default: true });
+	instance(pi);
+	await handlers.session_start({ reason: "startup" }, ctxUI);
+	return async () => {
+		editorText = "";
+		await commands.safe.handler("verify", ctxUI);
+		return editorText;
+	};
+};
+
+if (existsSync(STATE_FILE)) rmSync(STATE_FILE);
+writeFakePiVersion("9.9.9");
+process.env.SAFE_MODE_PI_PACKAGE = FAKE_PKG_JSON;
+const verifyDrift = await freshInstance();
+check("drift + verify OK → the Pi version is acknowledged", /已确认 Pi 9\.9\.9/.test(await verifyDrift()), true);
+const ackedState = existsSync(STATE_FILE) ? JSON.parse(readFileSync(STATE_FILE, "utf8")) : {};
+check("drift + verify OK → recorded in the state file", ackedState.acknowledgedPiVersion, "9.9.9");
+check("same version is not acknowledged twice in one process", /已确认 Pi/.test(await verifyDrift()), false);
+const verifyAfterRestart = await freshInstance();
+check("a restart with the same version stays quiet", /已确认 Pi/.test(await verifyAfterRestart()), false);
+writeFakePiVersion("10.0.0");
+const verifyNewVersion = await freshInstance();
+check("a new Pi version is acknowledged again", /已确认 Pi 10\.0\.0/.test(await verifyNewVersion()), true);
+
+// 校验失败时绝不能记录：把 SAFE_MODE_HOME 指向一个没有策略/清单的空目录
+if (existsSync(STATE_FILE)) rmSync(STATE_FILE);
+const BROKEN_HOME = join(tmpdir(), "safe-mode-drift-broken");
+mkdirSync(BROKEN_HOME, { recursive: true });
+process.env.SAFE_MODE_HOME = BROKEN_HOME;
+const verifyBroken = await freshInstance();
+const brokenOut = await verifyBroken();
+check("failed verification does not acknowledge the version", /已确认 Pi/.test(brokenOut), false);
+check("failed verification writes no state file", existsSync(STATE_FILE), false);
+
+delete process.env.SAFE_MODE_HOME;
+delete process.env.SAFE_MODE_PI_PACKAGE;
+rmSync(join(tmpdir(), "safe-mode-drift-pi"), { recursive: true, force: true });
+rmSync(BROKEN_HOME, { recursive: true, force: true });
+
+// ===========================================================================
 // 收尾
 // ===========================================================================
 check("notifications emitted", notices.length > 0, true);
 check("block cards recorded", entries.length > 0, true);
-const degraded = notices.filter((n) => /DEGRADED|UNAVAILABLE/.test(n));
+const degraded = degradedBeforeDrift; // 见第 26 节：故意触发的 UNAVAILABLE 不算真故障
 console.log(`      integrity notices: ${degraded.length === 0 ? "(none — integrity OK)" : degraded.join(" | ")}`);
 console.log(`      entry cards: ${entries.length} · notifications: ${notices.length} · state file: ${STATE_FILE}`);
 console.log(`      audit file: ${existsSync(AUDIT_FILE) ? `${readFileSync(AUDIT_FILE, "utf8").split("\n").filter(Boolean).length} line(s)` : "(none)"}`);
