@@ -384,6 +384,17 @@ function cardLines(data: SafeEntryData): string[] {
 	return lines;
 }
 
+/**
+ * 常驻卡片专用：在会话记录卡片正文后追加一行「怎么关掉」。
+ * 只用于 ctx.ui.setWidget（编辑器旁的常驻内容）——会话记录里的 🛡 卡片是审计痕迹，
+ * 不加这行，也不受 /safe dismiss 影响。
+ */
+const DISMISS_HINT = "   👉 关闭此提示：/safe dismiss（或直接发下一条消息）";
+
+function widgetCard(data: SafeEntryData): string[] {
+	return [...cardLines(data), DISMISS_HINT];
+}
+
 function blockReason(verdict: Verdict | undefined, why: string, overrideAction?: string): string {
 	if (!verdict) return `[SAFE MODE BLOCKED] ${why}`;
 	const action = overrideAction ?? verdict.action;
@@ -1088,7 +1099,7 @@ async function decide(
 			action: "DENY (fail-closed)",
 			level,
 		});
-		showWidget(dc.ctx, cardLines({ headline: "DEGRADED — blocked", reason: verdict.reason, action: "DENY (fail-closed)" }));
+		showWidget(dc.ctx, widgetCard({ headline: "DEGRADED — blocked", reason: verdict.reason, action: "DENY (fail-closed)" }));
 		logDecision(verdict, dc, "DENY (integrity fail-closed)", true, opaque);
 		return { allow: false, reason: blockReason(verdict, why, "DENY") };
 	}
@@ -1112,7 +1123,7 @@ async function decide(
 		logDecision(verdict, dc, "DENY", true, opaque);
 		showWidget(
 			dc.ctx,
-			cardLines({
+			widgetCard({
 				headline: "SAFE MODE BLOCKED",
 				ruleId: verdict.ruleId,
 				source: verdict.source,
@@ -1245,7 +1256,7 @@ async function decide(
 	});
 	showWidget(
 		dc.ctx,
-		cardLines({
+		widgetCard({
 			headline: "SAFE MODE — DECLINED",
 			ruleId: verdict.ruleId,
 			source: verdict.source,
@@ -1447,9 +1458,12 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 
 	// ---------------- 软约束：注入策略 ----------------
 
-	pi.on("before_agent_start", async (event) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		// HARD-OFF：连约束注入都没有 —— 与没装本扩展完全一致
 		if (!safeModeIsActive()) return undefined;
+		// 新的用户回合开始 → 收掉上一次留下的常驻拦阻卡片（手动入口见 /safe dismiss）。
+		// 只动 widget：会话记录、审计日志与 /safe explain 的历史都不受影响。
+		showWidget(ctx, undefined);
 		return { systemPrompt: `${event.systemPrompt}\n\n${buildInjection(policy)}` };
 	});
 
@@ -1478,7 +1492,7 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 					action: "DENY",
 					level,
 				});
-				showWidget(ctx, cardLines({ headline: "SAFE MODE BLOCKED — subagent", reason: reasonForBlock, action: "DENY" }));
+				showWidget(ctx, widgetCard({ headline: "SAFE MODE BLOCKED — subagent", reason: reasonForBlock, action: "DENY" }));
 				return { block: true, reason: `[SAFE MODE DENY] ${reasonForBlock}` };
 			}
 			// readonly 模式：capability ceiling 已生效，允许启动（子会话工具被限制为只读）
@@ -1588,6 +1602,7 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 				{ value: "rules", label: "rules", description: "规则清单（每条注明 safe.txt 出处）" },
 				{ value: "check", label: "check", description: "离线检查：完整性 + 规则冲突/重复/遮蔽 + 决策矩阵" },
 				{ value: "explain", label: "explain", description: "解释最近一次决策：规则、范围、为什么" },
+				{ value: "dismiss", label: "dismiss", description: "关闭常驻的拦截/拒绝卡片（审计记录保留）" },
 				{ value: "test", label: "test", description: "模拟一条操作（如 test bash rm -rf build）：只看结论，不执行" },
 				{ value: "audit", label: "audit", description: "查看决策审计日志（最后 20 条）" },
 				{ value: "verify", label: "verify", description: "重新做完整性校验" },
@@ -1869,6 +1884,13 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 						return "close";
 					});
 
+					options.push("　🧹 关闭常驻卡片（拦截 / 拒绝提示）");
+					actions.push(() => {
+						showWidget(ctx, undefined);
+						notify(ctx, "🛡 已关闭常驻卡片（审计记录不变）", "info");
+						return "loop";
+					});
+
 					options.push("　🔄 重新读取 safe.txt");
 					actions.push(() => {
 						const lines = doReload();
@@ -2032,6 +2054,12 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 					ctx.ui.setEditorText(explainDecision(argv[1]));
 					return;
 				}
+				case "dismiss": {
+					// 只清「编辑器旁的常驻卡片」；审计日志、会话记录与 /safe explain 不受影响
+					showWidget(ctx, undefined);
+					notify(ctx, "🛡 已关闭常驻卡片（拦截 / 拒绝提示）。审计记录与 /safe audit 不受影响。", "info");
+					return;
+				}
 				case "test": {
 					const toolName = (argv[1] ?? "").toLowerCase();
 					const target = argv.slice(2).join(" ");
@@ -2084,7 +2112,7 @@ export default function safeModeExtension(pi: ExtensionAPI): void {
 					return;
 				}
 				default: {
-					notify(ctx, `🛡 unknown /safe subcommand: ${sub}. Try: on, off, low, balanced, strict, reset, default, status, doctor, rules, check, explain, test, audit, verify, reload, subagent, log`, "warning");
+					notify(ctx, `🛡 unknown /safe subcommand: ${sub}. Try: on, off, low, balanced, strict, reset, default, status, doctor, rules, check, explain, dismiss, test, audit, verify, reload, subagent, log`, "warning");
 					return;
 				}
 			}

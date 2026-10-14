@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Unreleased — 常驻拦阻卡片可关闭（`/safe dismiss`）
+
+- 拦截 / 拒绝时弹的那张卡片，现在多一行 `👉 关闭此提示：/safe dismiss（或直接发下一条消息）`
+- 新的用户回合开始时自动收掉上一次留下的常驻卡片：只动**编辑器旁的 widget**，
+  会话记录里的 🛡 卡片、审计日志与 `/safe explain` 的历史都不受影响
+- 新增 `/safe dismiss`；`/safe` 面板里也多了「🧹 关闭常驻卡片（拦截 / 拒绝提示）」一行
+- `/safe` 未知子命令的提示文案补齐 `dismiss`
+- 未改 `safe.txt`、未动 `SAFE_MODE_VERSION`（仍为 1.3.0），也未新增测试用例
+
+> 说明：与上一条 Unreleased 同因 —— 该改动此前只存在于**部署副本**
+> （本机 `safe-mode/pi-extension/index.ts` 与 Pi 镜像里的 `safe-mode/index.ts`，
+> 两份 sha256 同为 `fc16c84714be…`）而没有进仓库，本次一并收进来。
+
 ## Unreleased — 版本漂移提醒确认（`acknowledgedPiVersion`）
 
 - 修一个死循环式的提醒：`safe-manifest.json` 里的 `piVersion` 只有 `safe-regen.ps1` 会改写，
