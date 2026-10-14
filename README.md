@@ -18,15 +18,31 @@ ALLOW / CONFIRM / DENY 裁决（内建工具、扩展工具、MCP 工具都覆�
 
 ### 0.1 三步装好
 
-需要：Windows + PowerShell + 已经装好的 pi。不依赖网络，装完离线可用。
+需要：Windows + PowerShell + 已经装好的 pi。**不需要 git**（第 1 步二选一）；
+也不依赖网络 —— 只有用 1b 下 zip 的那一次要联网，装完离线可用。
 
 ```powershell
-# 1) 取到仓库
+# 1) 取到仓库 —— 二选一
+
+# 1a) 有 git
 git clone https://github.com/AirFlavoredGum/pi-safe-mode.git <仓库位置>\pi-safe-mode
+
+# 1b) 没有 git：用 Windows 自带的 PowerShell 下 GitHub 的 zip
+$dst = '<仓库位置>'
+New-Item -ItemType Directory -Force -Path $dst | Out-Null
+Invoke-WebRequest https://github.com/AirFlavoredGum/pi-safe-mode/archive/refs/heads/main.zip -OutFile "$dst\pi-safe-mode.zip"
+Expand-Archive "$dst\pi-safe-mode.zip" -DestinationPath $dst -Force
+Remove-Item "$dst\pi-safe-mode.zip"
+# 解压出来是 <仓库位置>\pi-safe-mode-main\ —— 下一条命令里的 <仓库位置>\pi-safe-mode 换成它
 
 # 2) 装到你的 Pi 根目录（先加 -WhatIf 可以只看它会做什么）
 powershell -NoProfile -ExecutionPolicy Bypass -File <仓库位置>\pi-safe-mode\install.ps1 -Root <Pi 根目录>
 ```
+
+> **为什么有人会卡在第 1 步**：`git` 不是 Windows 自带的，cmd 会回一句
+> `'git' 不是内部或外部命令，也不是可运行的程序或批处理文件。`。
+> Safe Mode 本身**不需要 git** —— `install.ps1`、`safe-bootstrap.ps1`、`safe-regen.ps1`
+> 都是纯 PowerShell，用 1b 把仓库下下来就能照常装。
 
 `-Root` 指的是**包含 `safe-mode\` 目录的那一级**。装完后按脚本提示做两件事：
 

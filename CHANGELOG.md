@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — 文档：安装不再要求 git
+
+- README §0.1 新增 **1b**：用 Windows 自带的 `Invoke-WebRequest` + `Expand-Archive` 下 GitHub 的 zip，
+  完全没有 git 的机器也能装（1a 的 `git clone` 保留给有 git 的人，二选一）
+- 写明「Safe Mode 不需要 git」，并在同一处解释那个常见报错
+  `'git' 不是内部或外部命令，也不是可运行的程序或批处理文件。`
+- 只改文档：`install.ps1` / `safe-bootstrap.ps1` / `safe-regen.ps1` / `safe.txt` / 实现一行未动
+
 ## Unreleased — 常驻拦阻卡片可关闭（`/safe dismiss`）
 
 - 拦截 / 拒绝时弹的那张卡片，现在多一行 `👉 关闭此提示：/safe dismiss（或直接发下一条消息）`
